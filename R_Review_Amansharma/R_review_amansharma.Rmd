@@ -1,0 +1,378 @@
+---
+title: "R Review Project"
+output: review_notebook
+---
+
+First, I import the necessary libraries + get the path to my analysis data.
+
+```{r}
+if (!require("BiocManager", quietly = TRUE))
+install.packages("BiocManager")
+BiocManager::install(version = "3.18")
+if (!require("TCGAbiolinks", quietly = TRUE))
+BiocManager::install("TCGAbiolinks")
+if (!require("maftools", quietly = TRUE))
+BiocManager::install("maftools")
+
+library(BiocManager)
+library(TCGAbiolinks)
+library(maftools)
+```
+
+After reading the clinical data, I create + download a maf_query and convert it into an object for my analyses.
+
+```{r}
+
+#Clin Query
+
+clin_query <- GDCquery(project = "TCGA-SKCM",
+                       data.category = "Clinical",
+                       data.type = "Clinical Supplement",
+                       data.format = 'BCR Biotab')
+  
+GDCdownload(clin_query)
+  
+clinical.BCRtab.all <- GDCprepare(clin_query)
+
+clinic <- clinical.BCRtab.all$clinical_patient_skcm[-c(1,2),]
+colnames(clinic)[ colnames(clinic) == "bcr_patient_barcode" ] <- "Tumor_Sample_Barcode"
+
+#RNA Query
+
+rna_query <- GDCquery(project ="TCGA-SKCM",
+                      data.category = "Transcriptome Profiling",
+                      data.type = "Gene Expression Quantification",
+                      workflow.type = "STAR - Counts")
+GDCdownload(rna_query)
+rna_se <- GDCprepare(rna_query)
+
+# The clinical data is the colData. I converted TSBs into patients for ease of use
+
+rna_clinical <- rna_se@colData
+rna_clinical <- as.data.frame(rna_clinical)
+rna_clinical$Tumor_Sample_Barcode <- rna_clinical$patient
+
+#MAF Query
+
+maf_query <- GDCquery(
+  project = 'TCGA-SKCM',
+  data.category = "Simple Nucleotide Variation",
+  access = "open", # we only have access to somatic mutations which are open access
+  data.type = "Masked Somatic Mutation",
+  workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
+)
+
+GDCdownload(maf_query)
+
+maf <- GDCprepare(maf_query) # as long as it runs, ignore any errors
+
+maf_object <- read.maf(maf = maf,
+                       clinicalData = rna_clinical, 
+                       isTCGA = TRUE)
+```
+
+I am downloading and staging the survival and survminer libraries for KM Plot analysis.
+
+```{r}
+if(!require(survival)){
+  install.packages("survival")
+}
+library(survival)
+
+if(!require(survminer)){
+  install.packages("survminer")
+}
+library(survminer)
+
+if(!require(ggplot2)){
+  install.packages("ggplot2")
+}
+library(ggplot2)
+```
+
+Preparation + Cleaning of Data
+
+```{r}
+
+# I created a mask to discern between metastatic / non metastatic patients
+
+metastatic_mask <- ifelse(is.na(rna_clinical$definition), F, T)
+
+metastatic_mask <- !is.na(rna_clinical$definition)
+
+clean_rna_clinical <- rna_clinical[metastatic_mask, ]
+
+clean_rna_clinical$metastatic_status <- ifelse(clean_rna_clinical$definition == "Metastatic", "Metastatic", "Non-metastatic")
+
+# I then created a survival time column based on existing days to death and days to last followup columns
+
+clean_rna_clinical$survival_time <- ifelse(is.na(clean_rna_clinical$days_to_death), clean_rna_clinical$days_to_last_follow_up, clean_rna_clinical$days_to_death)
+
+# I finally created a death event column based on the original vital_status column
+
+clean_rna_clinical$death_event <- ifelse(clean_rna_clinical$vital_status == "Dead", TRUE, FALSE)
+```
+
+Debugging/Testing Zone
+
+```{r}
+
+```
+
+1) KM Survival Plot - Survival between metastatic and non-metastatic patients
+
+```{r}
+
+# I created a survival object based on time and events and fit the model onto the data
+
+survival_object <- Surv(time = clean_rna_clinical$survival_time, event = clean_rna_clinical$death_event)
+
+fit_object <- survfit(survival_object ~ clean_rna_clinical$metastatic_status, data = clean_rna_clinical)
+
+# This creates my survival plot
+
+survplot <- ggsurvplot(fit_object,
+                       pval = TRUE,
+                       ggtheme = theme(plot.margin = unit(c(1,1,1,1), "cm")),
+                       legend = "right")
+
+print(survplot)
+ggsave("/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/KMSurv.png")
+```
+
+Preparation of data for Co-Oncoplots
+
+```{r}
+
+# For the oncoplot, I am using clinical data from the maf object
+
+maf_clinical <- maf_object@clinical.data
+
+# I made a metastatic_status column just to discern easily between the two types
+
+maf_clinical$metastatic_status <- ifelse(maf_clinical$definition == "Metastatic", 'Metastatic', 'Non-metastatic')
+
+# I then created a maf subset for metastatic patients
+
+metastatic_barcodes <- maf_clinical[maf_clinical$metastatic_status == 'Metastatic',]
+metastatic_barcodes <- metastatic_barcodes$Tumor_Sample_Barcode
+
+metastatic_maf <- subsetMaf(maf = maf_object,
+                            tsb = metastatic_barcodes)
+
+# And then a maf subset for non-metastatic patients
+
+nonmetastatic_barcodes <- maf_clinical[maf_clinical$metastatic_status == 'Non-metastatic',]
+nonmetastatic_barcodes <- nonmetastatic_barcodes$Tumor_Sample_Barcode
+
+nonmetastatic_maf <- subsetMaf(maf = maf_object,
+                               tsb = nonmetastatic_barcodes)
+```
+2) Co-Oncoplots - Mutation differences between metastatic and non-metastatic patients for multiple genes
+
+```{r}
+
+# I then used these two subsets to create a co-oncoplot
+
+coOncoplot(m1 = metastatic_maf, 
+           m2 = nonmetastatic_maf, 
+           m1Name = "Metastatic Patients", 
+           m2Name = "Non-metastatic Patients", 
+           borderCol = NA)
+
+ggsave("/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/cooncoplot.png")
+```
+
+3) Co-Lollipot Plot - Mutation differences for a gene of interest
+
+```{r}
+
+# I used the two subsets again to make a lollipop plot to see mutation differences for the TP53 gene.
+
+lollipopPlot2(m1 = metastatic_maf,
+              m2 = nonmetastatic_maf,
+              m1_name = "Metastatic Patients",
+              m2_name = "Non-metastatic Patients",
+              gene = "TP53")
+
+ggsave("/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/colollipopTP53.png")
+```
+4.1) Somatic interaction plot - coocurrence / mutal exclusion of common gene mutations - METASTATIC PATIENTS
+
+```{r}
+
+# I then used the metastatic subset to create a somatic interaction plot to see coocurrence and mutual exclusion of common gene mutations
+
+somaticInteractions(maf = metastatic_maf,
+                    top = 10,
+                    pvalue = c(0.05, 0.1))
+
+ggsave("/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/somaticinteraction_metastatic.png")
+```
+4.2) Somatic interaction plot - coocurrence / mutual exclusion of common gene mutations - NONMETASTATIC PATIENTS
+
+```{r}
+
+# I did the same for the non-metastatic maf
+
+somaticInteractions(maf = nonmetastatic_maf,
+                    top = 10,
+                    pvalue = c(0.05, 0.1))
+
+ggsave("/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/somaticinteraction_nonmetastatic.png")
+```
+
+Installation of DNASeq2
+
+```{r}
+BiocManager::install("DESeq2")
+library(DESeq2)
+```
+
+Preparation of treatment data - we need to account for radiation, chemotherapy, immunotherapy, molecular therapy, and vaccines
+
+```{r}
+
+# To get information about treatments, I used the rad and drug data from the clinical.BCRtab.all
+
+rad <- clinical.BCRtab.all$clinical_radiation_skcm[-c(1,2),]
+rad$patient <- rad$bcr_patient_barcode
+drug <- clinical.BCRtab.all$clinical_drug_skcm[-c(1,2),]
+drug$patient <- drug$bcr_patient_barcode
+
+#unique(drug$pharmaceutical_therapy_type)
+
+# I then declared an rna_clind, which I would be manipulating
+
+rna_clind <- as.data.frame(rna_se@colData)
+
+# I initially set the new Radiation column for RNAclind to 0
+
+# For each patient in rad where radiation treatment is present, I'd make according changes in the rna_clind Radiation column
+
+# I would change the cell's value to 1.
+
+rna_clind$Radiation <- 0
+for (i in 1:nrow(rna_clind)) {
+  patient_id <- rna_clind$patient[i]
+  if (any(rad$patient == patient_id)) 
+    {
+    rna_clind$Radiation[i] <- 1
+  }
+}
+
+# I would do the same for the other types of therapy, making new columns
+
+# However, drug had different therapy types, so I had to make multiple columns and check their text values
+
+# Based on the presence of these words in the therapy type section records, I'd change them to 1 or leave them as 0.
+
+rna_clind$Chemotherapy <- 0
+for (i in 1:nrow(rna_clind)) {
+  patient_id <- rna_clind$patient[i]
+  patient_treatments <- drug[drug$patient == patient_id, ]$pharmaceutical_therapy_type
+  if ("Chemotherapy" %in% patient_treatments) {
+    rna_clind$Chemotherapy[i] <- 1
+  }
+}
+
+rna_clind$Immunotherapy <- 0
+for (i in 1:nrow(rna_clind)) {
+  patient_id <- rna_clind$patient[i]
+  patient_treatments <- drug[drug$patient == patient_id, ]$pharmaceutical_therapy_type
+  if ("Immunotherapy" %in% patient_treatments) {
+    rna_clind$Immunotherapy[i] <- 1
+  }
+}
+
+rna_clind$Molecular_Therapy <- 0
+for (i in 1:nrow(rna_clind)) {
+  patient_id <- rna_clind$patient[i]
+  patient_treatments <- drug[drug$patient == patient_id, ]$pharmaceutical_therapy_type
+  if ("Targeted Molecular therapy" %in% patient_treatments) {
+    rna_clind$Molecular_Therapy[i] <- 1
+  }
+}
+
+rna_clind$Vaccine <- 0
+for (i in 1:nrow(rna_clind)) {
+  patient_id <- rna_clind$patient[i]
+  patient_treatments <- drug[drug$patient == patient_id, ]$pharmaceutical_therapy_type
+  if ("Vaccine" %in% patient_treatments) {
+    rna_clind$Vaccine[i] <- 1
+  }
+}
+```
+
+
+5) DESeq2 + Volcano Plot - Differential expression between non-metastatic and metastatic patients controlling for treatment effects, race, gender, and vital status 
+
+```{r}
+
+# I would gather the rna_counts and rna_genes next in preparation for the DESeq2
+
+rna_counts <- as.data.frame(rna_se@assays@data$unstranded)
+rna_genes <- rna_se@rowRanges@elementMetadata
+rna_genes <- as.data.frame(rna_genes)
+rownames(rna_counts) <- rownames(rna_genes)
+colnames(rna_counts) <- rownames(rna_clind)
+
+# I also converted definition into metastatic_status for ease of use
+
+rna_clind$metastatic_status <- ifelse(rna_clind$definition == "Metastatic", "Metastatic", "Non-metastatic")
+
+#[176] "Radiation"                                                                                     
+#[177] "Chemotherapy"                                                                                  
+#[178] "Immunotherapy"                                                                                 
+#[179] "Molecular_Therapy"                                                                             
+#[180] "Vaccine"                                                                                       
+
+# DSeq2 requires factorization of covariates and columns used
+
+rna_clind$Radiation <- factor(rna_clind$Radiation)
+rna_clind$Chemotherapy <- factor(rna_clind$Chemotherapy)
+rna_clind$Immunotherapy <- factor(rna_clind$Immunotherapy)
+rna_clind$Molecular_Therapy <- factor(rna_clind$Molecular_Therapy)
+rna_clind$Vaccine <- factor(rna_clind$Vaccine)
+rna_clind$race <- factor(rna_clind$race)
+rna_clind$gender <- factor(rna_clind$gender)
+rna_clind$vital_status <- factor(rna_clind$vital_status)
+rna_clind$metastatic_status <- factor(rna_clind$metastatic_status)
+
+# Creating the DDS
+
+dds <- DESeqDataSetFromMatrix(count = rna_counts,
+                              colData = rna_clind,
+                              design =~  + Radiation + Chemotherapy + Immunotherapy + Molecular_Therapy + Vaccine + gender + vital_status + metastatic_status)
+unique(rna_clind$definition)
+
+# Turning the DDS into a DDS Object
+
+dds_obj <- DESeq(dds)
+
+resultsNames(dds_obj)
+
+# Gathering results from the DDS
+
+results <- results(dds_obj, format = "DataFrame", contrast = c("metastatic_status", "Non.metastatic", "Metastatic"))
+results <- data.frame(results)
+results <- results[!is.na(results$padj) & results$padj < 0.05 & abs(results$log2FoldChange) > 1, ]
+results <- data.frame(results)
+results
+```
+
+```{r}
+BiocManager::install("EnhancedVolcano")
+library(EnhancedVolcano)
+
+EnhancedVolcano(results,
+                lab = 'gene_name',
+                x = 'log2FoldChange',
+                y = 'pvalue',
+                title = 'Metastatic vs. Nonmetastatic',
+                pointSize = 1.0,
+                labSize = 1.0)
+
+ggsave("/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/volcanicplot.png")
+```
+
