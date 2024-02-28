@@ -30,7 +30,7 @@ clin_query <- GDCquery(project = "TCGA-SKCM",
                        data.type = "Clinical Supplement",
                        data.format = 'BCR Biotab')
   
-GDCdownload(clin_query)
+#GDCdownload(clin_query)
   
 clinical.BCRtab.all <- GDCprepare(clin_query)
 
@@ -43,7 +43,7 @@ rna_query <- GDCquery(project ="TCGA-SKCM",
                       data.category = "Transcriptome Profiling",
                       data.type = "Gene Expression Quantification",
                       workflow.type = "STAR - Counts")
-GDCdownload(rna_query)
+#GDCdownload(rna_query)
 rna_se <- GDCprepare(rna_query)
 
 # The clinical data is the colData. I converted TSBs into patients for ease of use
@@ -62,7 +62,7 @@ maf_query <- GDCquery(
   workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
 )
 
-GDCdownload(maf_query)
+#GDCdownload(maf_query)
 
 maf <- GDCprepare(maf_query) # as long as it runs, ignore any errors
 
@@ -137,7 +137,7 @@ survplot <- ggsurvplot(fit_object,
                        legend = "right")
 
 print(survplot)
-ggsave("/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/KMSurv.png")
+#ggsave("/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/KMSurv.png")
 ```
 
 Preparation of data for Co-Oncoplots
@@ -174,13 +174,19 @@ nonmetastatic_maf <- subsetMaf(maf = maf_object,
 
 # I then used these two subsets to create a co-oncoplot
 
+#output_file_path <- "/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/my_coOncoplot.png"
+
+#png(filename = output_file_path, width = 800, height = 600, res = 72)
+
 coOncoplot(m1 = metastatic_maf, 
            m2 = nonmetastatic_maf, 
            m1Name = "Metastatic Patients", 
            m2Name = "Non-metastatic Patients", 
            borderCol = NA)
 
-ggsave("/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/cooncoplot.png")
+#dev.off()
+
+
 ```
 
 3) Co-Lollipot Plot - Mutation differences for a gene of interest
@@ -189,13 +195,19 @@ ggsave("/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/cooncoplot.png")
 
 # I used the two subsets again to make a lollipop plot to see mutation differences for the TP53 gene.
 
+#output_file_path <- "/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/lollipopTP53.png"
+
+#png(filename = output_file_path, width = 800, height = 600, res = 72)
+
 lollipopPlot2(m1 = metastatic_maf,
               m2 = nonmetastatic_maf,
               m1_name = "Metastatic Patients",
               m2_name = "Non-metastatic Patients",
               gene = "TP53")
 
-ggsave("/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/colollipopTP53.png")
+#dev.off()
+
+
 ```
 4.1) Somatic interaction plot - coocurrence / mutal exclusion of common gene mutations - METASTATIC PATIENTS
 
@@ -203,11 +215,15 @@ ggsave("/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/colollipopTP53.png
 
 # I then used the metastatic subset to create a somatic interaction plot to see coocurrence and mutual exclusion of common gene mutations
 
+#output_file_path <- "/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/metastaticSIP.png"
+
+#png(filename = output_file_path, width = 800, height = 600, res = 72)
+
 somaticInteractions(maf = metastatic_maf,
                     top = 10,
                     pvalue = c(0.05, 0.1))
 
-ggsave("/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/somaticinteraction_metastatic.png")
+#dev.off()
 ```
 4.2) Somatic interaction plot - coocurrence / mutual exclusion of common gene mutations - NONMETASTATIC PATIENTS
 
@@ -215,11 +231,15 @@ ggsave("/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/somaticinteraction
 
 # I did the same for the non-metastatic maf
 
+# output_file_path <- "/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/nonmetastaticSIP.png"
+
+# png(filename = output_file_path, width = 800, height = 600, res = 72)
+
 somaticInteractions(maf = nonmetastatic_maf,
                     top = 10,
                     pvalue = c(0.05, 0.1))
 
-ggsave("/Users/amansharma/Desktop/QBIO490/qbio_490_amansharma/somaticinteraction_nonmetastatic.png")
+# dev.off()
 ```
 
 Installation of DNASeq2
